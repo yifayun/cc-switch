@@ -887,20 +887,19 @@ fn write_helper_script(host: &CodexSshHost) -> Result<PathBuf, AppError> {
                 ));
             }
         }
+        let target_esc = target.replace('\'', "''");
+        let remote_esc = remote_dir.replace('\'', "''");
         content.push_str(&format!(
-            "& ssh @sshOpts '{target}' \"mkdir -p {remote} && chmod 700 {remote}\"; if ($LASTEXITCODE -ne 0) {{ $err = 1 }}\n",
-            remote = remote_dir.replace('\'', "''"),
+            "& ssh @sshOpts '{target_esc}' \"mkdir -p {remote_esc} && chmod 700 {remote_esc}\"; if ($LASTEXITCODE -ne 0) {{ $err = 1 }}\n"
         ));
         content.push_str(&format!(
-            "& scp @scpOpts '{config}' '{target}:{remote}/config.toml'; if ($LASTEXITCODE -ne 0) {{ $err = 1 }}\n",
+            "& scp @scpOpts '{config}' '{target_esc}:{remote_esc}/config.toml'; if ($LASTEXITCODE -ne 0) {{ $err = 1 }}\n",
             config = config.display().to_string().replace('\'', "''"),
-            remote = remote_dir.replace('\'', "''"),
         ));
         if auth.is_file() {
             content.push_str(&format!(
-                "if (Test-Path -LiteralPath '{auth}') {{ & scp @scpOpts '{auth}' '{target}:{remote}/auth.json'; if ($LASTEXITCODE -ne 0) {{ $err = 1 }} }}\n",
+                "if (Test-Path -LiteralPath '{auth}') {{ & scp @scpOpts '{auth}' '{target_esc}:{remote_esc}/auth.json'; if ($LASTEXITCODE -ne 0) {{ $err = 1 }} }}\n",
                 auth = auth.display().to_string().replace('\'', "''"),
-                remote = remote_dir.replace('\'', "''"),
             ));
         }
         if catalog.is_file() {
@@ -909,9 +908,8 @@ fn write_helper_script(host: &CodexSshHost) -> Result<PathBuf, AppError> {
                 .and_then(|s| s.to_str())
                 .unwrap_or("cc-switch-model-catalog.json");
             content.push_str(&format!(
-                "if (Test-Path -LiteralPath '{catalog}') {{ & scp @scpOpts '{catalog}' '{target}:{remote}/{name}'; if ($LASTEXITCODE -ne 0) {{ $err = 1 }} }}\n",
+                "if (Test-Path -LiteralPath '{catalog}') {{ & scp @scpOpts '{catalog}' '{target_esc}:{remote_esc}/{name}'; if ($LASTEXITCODE -ne 0) {{ $err = 1 }} }}\n",
                 catalog = catalog.display().to_string().replace('\'', "''"),
-                remote = remote_dir.replace('\'', "''"),
                 name = name,
             ));
         }
