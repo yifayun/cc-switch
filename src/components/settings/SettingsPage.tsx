@@ -52,6 +52,7 @@ import { UsageDashboard } from "@/components/usage/UsageDashboard";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
 import { CodexAuthSettings } from "@/components/settings/CodexAuthSettings";
+import { CodexSshSyncSection } from "@/components/settings/CodexSshSyncSection";
 import { useInstalledSkills } from "@/hooks/useSkills";
 import { useSettings } from "@/hooks/useSettings";
 import { useImportExport } from "@/hooks/useImportExport";
@@ -277,6 +278,12 @@ export function SettingsPage({
                     <CodexAuthSettings
                       settings={settings}
                       onChange={handleAutoSave}
+                    />
+                    <CodexSshSyncSection
+                      initial={settings.codexSshSync}
+                      onSaved={(codexSshSync) =>
+                        updateSettings({ codexSshSync })
+                      }
                     />
                     <WindowSettings
                       settings={settings}

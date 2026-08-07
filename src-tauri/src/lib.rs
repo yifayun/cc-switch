@@ -1437,6 +1437,12 @@ pub fn run() {
             commands::webdav_sync_download,
             commands::webdav_sync_save_settings,
             commands::webdav_sync_fetch_remote_info,
+            // Codex SSH remote sync (gateway + auth)
+            commands::codex_ssh_sync_get_settings,
+            commands::codex_ssh_sync_save_settings,
+            commands::codex_ssh_sync_now,
+            commands::codex_ssh_sync_test_host,
+            commands::codex_ssh_sync_install_hooks,
             commands::s3_test_connection,
             commands::s3_sync_upload,
             commands::s3_sync_download,

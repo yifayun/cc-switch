@@ -1,0 +1,112 @@
+name: Build Windows MSI (x64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build/windows-msi
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-windows-msi-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-msi-x64:
+    name: Windows MSI x64
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup pnpm
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+        run: |
+          corepack enable
+          corepack install
+          node --version
+          pnpm --version
+
+      - name: Get pnpm store directory
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Windows MSI x64
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Skip updater signature artifacts so forks without TAURI signing secrets can still produce MSI.
+          pnpm tauri build --bundles msi --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}'
+
+      - name: Prepare MSI asset
+        id: asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle/msi' -Recurse -Filter '*.msi' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($null -eq $msi) {
+            $msi = Get-ChildItem -Path 'src-tauri/target' -Recurse -Filter '*.msi' -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+          if ($null -eq $msi) {
+            throw 'No Windows MSI found after build'
+          }
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $name = "CC-Switch-v$version-Windows.msi"
+          Copy-Item $msi.FullName (Join-Path 'release-assets' $name)
+          "msi_name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "version=v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Get-FileHash (Join-Path 'release-assets' $name) -Algorithm SHA256 |
+            ForEach-Object { "SHA256=$($_.Hash.ToLower())" } |
+            Tee-Object -FilePath (Join-Path 'release-assets' "$name.sha256")
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-msi-x64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish draft release with MSI
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-msi-${{ steps.asset.outputs.version }}-${{ github.run_number }}
+          name: Windows MSI x64 ${{ steps.asset.outputs.version }} (build ${{ github.run_number }})
+          draft: true
+          prerelease: true
+          files: release-assets/*
+          body: |
+            Automated Windows **安装版 (.msi) x64** build.
+
+            - File: `${{ steps.asset.outputs.msi_name }}`
+            - Commit: `${{ github.sha }}`
+            - Branch: `${{ github.ref_name }}`
+
+            Includes Codex SSH remote sync (gateway + auth).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

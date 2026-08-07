@@ -2128,12 +2128,16 @@ pub fn write_codex_live_for_provider(
         || (category != Some("official")
             && !crate::settings::preserve_codex_official_auth_on_switch());
 
-    if should_write_auth {
+    let result = if should_write_auth {
         write_codex_live_atomic(auth, config_text)
     } else {
         let live_config = prepare_codex_provider_live_config(auth, config_text.unwrap_or(""))?;
         write_codex_live_config_atomic(Some(&live_config))
+    };
+    if result.is_ok() {
+        crate::services::codex_ssh_sync::schedule_auto_sync_after_live_write();
     }
+    result
 }
 
 /// Build the live Codex config for provider switching.

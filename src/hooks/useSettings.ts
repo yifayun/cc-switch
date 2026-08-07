@@ -198,6 +198,7 @@ export function useSettings(): UseSettingsResult {
         const {
           webdavSync: _ignoredWebdavSync,
           s3Sync: _ignoredS3Sync,
+          codexSshSync: _ignoredCodexSshSync,
           ...restSettings
         } = mergedSettings;
 
@@ -338,6 +339,7 @@ export function useSettings(): UseSettingsResult {
         const {
           webdavSync: _ignoredWebdavSync,
           s3Sync: _ignoredS3Sync,
+          codexSshSync: _ignoredCodexSshSync,
           ...restSettings
         } = mergedSettings;
 

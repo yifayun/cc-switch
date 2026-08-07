@@ -43,6 +43,10 @@ fn merge_settings_for_save(
         }
         _ => {}
     }
+    // Codex SSH sync is saved via dedicated commands; omit → keep existing.
+    if incoming.codex_ssh_sync.is_none() {
+        incoming.codex_ssh_sync = existing.codex_ssh_sync.clone();
+    }
     // local_migrations 是纯后端状态（迁移完成标记），前端没有合法的修改场景，
     // 无条件取现有值。若按 incoming 透传：后端清掉 marker（如关闭统一会话
     // 开关）后、前端 query 缓存刷新前的一次全量保存会把旧 marker 重放回来，
@@ -438,6 +442,45 @@ mod tests {
         assert_eq!(
             merged.webdav_sync.as_ref().map(|v| v.password.as_str()),
             Some("")
+        );
+    }
+
+    #[test]
+    fn save_settings_should_preserve_existing_codex_ssh_sync_when_payload_omits_it() {
+        use crate::settings::{CodexSshHost, CodexSshSyncSettings};
+
+        let existing = AppSettings {
+            codex_ssh_sync: Some(CodexSshSyncSettings {
+                enabled: true,
+                hosts: vec![CodexSshHost {
+                    id: "h1".into(),
+                    name: "srv".into(),
+                    host: "1.2.3.4".into(),
+                    port: 22,
+                    user: "root".into(),
+                    identity_file: None,
+                    ssh_alias: Some("mysrv".into()),
+                    remote_codex_dir: "~/.codex".into(),
+                    enabled: true,
+                    auto_sync: true,
+                    sync_on_ssh_connect: true,
+                    forward_proxy: true,
+                    last_sync_at: None,
+                    last_error: None,
+                }],
+            }),
+            ..AppSettings::default()
+        };
+        let incoming = AppSettings::default();
+        let merged = merge_settings_for_save(incoming, &existing);
+        assert!(merged.codex_ssh_sync.is_some());
+        assert_eq!(
+            merged
+                .codex_ssh_sync
+                .as_ref()
+                .and_then(|s| s.hosts.first())
+                .map(|h| h.host.as_str()),
+            Some("1.2.3.4")
         );
     }
 

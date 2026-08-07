@@ -2883,6 +2883,7 @@ impl ProxyService {
                         .map_err(|e| format!("写入 Codex 配置失败: {e}"))?;
                         crate::codex_config::write_codex_live_config_atomic(Some(&live_config))
                             .map_err(|e| format!("写入 Codex 配置失败: {e}"))?;
+                        crate::services::codex_ssh_sync::schedule_auto_sync_after_live_write();
                         return Ok(());
                     }
                 }
@@ -2947,6 +2948,7 @@ impl ProxyService {
             };
             crate::codex_config::write_codex_live_config_atomic(Some(&live_config))
                 .map_err(|e| format!("写入 Codex 配置失败: {e}"))?;
+            crate::services::codex_ssh_sync::schedule_auto_sync_after_live_write();
             return Ok(());
         }
 
@@ -3017,6 +3019,7 @@ impl ProxyService {
             (None, None) => {}
         }
 
+        crate::services::codex_ssh_sync::schedule_auto_sync_after_live_write();
         Ok(())
     }
 

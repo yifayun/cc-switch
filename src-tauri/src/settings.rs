@@ -465,6 +465,10 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_sync: Option<S3SyncSettings>,
 
+    // ===== Codex SSH 远程同步（网关 + 认证）=====
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_ssh_sync: Option<CodexSshSyncSettings>,
+
     // ===== WebDAV 备份设置（旧版，保留向后兼容）=====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webdav_backup: Option<serde_json::Value>,
@@ -545,6 +549,7 @@ impl Default for AppSettings {
             skill_storage_location: SkillStorageLocation::default(),
             webdav_sync: None,
             s3_sync: None,
+            codex_ssh_sync: None,
             webdav_backup: None,
             backup_interval_hours: None,
             backup_retain_count: None,
@@ -1139,6 +1144,172 @@ pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
     mutate_settings(|current| {
         if let Some(s3) = current.s3_sync.as_mut() {
             s3.status = status;
+        }
+    })
+}
+
+// ===== Codex SSH 同步设置 =====
+
+fn default_ssh_port() -> u16 {
+    22
+}
+
+fn default_remote_codex_dir() -> String {
+    "~/.codex".to_string()
+}
+
+/// 单个 Codex SSH 远程主机
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSshHost {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_file: Option<String>,
+    /// SSH config Host 别名；Codex / Cursor 连接时用这个名字即可触发 LocalCommand 同步
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_alias: Option<String>,
+    #[serde(default = "default_remote_codex_dir")]
+    pub remote_codex_dir: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// 本地切换供应商 / 网关接管后自动推送到该主机
+    #[serde(default = "default_true")]
+    pub auto_sync: bool,
+    /// 写入 SSH config LocalCommand，使每次 SSH/Codex 连接前自动同步
+    #[serde(default = "default_true")]
+    pub sync_on_ssh_connect: bool,
+    /// 在 SSH config 中 RemoteForward 本地代理端口，让远程 `127.0.0.1:<port>` 走本机网关
+    #[serde(default = "default_true")]
+    pub forward_proxy: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_sync_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+impl CodexSshHost {
+    pub fn normalize(&mut self) {
+        self.name = self.name.trim().to_string();
+        self.host = self.host.trim().to_string();
+        self.user = self.user.trim().to_string();
+        self.remote_codex_dir = self.remote_codex_dir.trim().to_string();
+        if self.remote_codex_dir.is_empty() {
+            self.remote_codex_dir = default_remote_codex_dir();
+        }
+        if self.port == 0 {
+            self.port = default_ssh_port();
+        }
+        if let Some(alias) = self.ssh_alias.as_mut() {
+            let trimmed = alias.trim().to_string();
+            if trimmed.is_empty() {
+                self.ssh_alias = None;
+            } else {
+                *alias = trimmed;
+            }
+        }
+        if let Some(identity) = self.identity_file.as_mut() {
+            let trimmed = identity.trim().to_string();
+            if trimmed.is_empty() {
+                self.identity_file = None;
+            } else {
+                *identity = trimmed;
+            }
+        }
+        if self.name.is_empty() {
+            self.name = self.host.clone();
+        }
+    }
+
+    pub fn resolve_alias(&self) -> String {
+        self.ssh_alias
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                let safe: String = self
+                    .host
+                    .chars()
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+                format!("cc-switch-{}", safe.trim_matches('-'))
+            })
+    }
+}
+
+/// Codex SSH 远程同步总开关与主机列表
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSshSyncSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub hosts: Vec<CodexSshHost>,
+}
+
+impl CodexSshSyncSettings {
+    pub fn normalize(&mut self) {
+        for host in &mut self.hosts {
+            host.normalize();
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), AppError> {
+        for host in &self.hosts {
+            if host.host.trim().is_empty() {
+                return Err(AppError::localized(
+                    "codex_ssh_sync.host.required",
+                    "SSH 主机地址不能为空",
+                    "SSH host is required.",
+                ));
+            }
+            if host.user.trim().is_empty() {
+                return Err(AppError::localized(
+                    "codex_ssh_sync.user.required",
+                    "SSH 用户名不能为空",
+                    "SSH username is required.",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn get_codex_ssh_sync_settings() -> Option<CodexSshSyncSettings> {
+    settings_store().read().ok()?.codex_ssh_sync.clone()
+}
+
+pub fn set_codex_ssh_sync_settings(settings: Option<CodexSshSyncSettings>) -> Result<(), AppError> {
+    mutate_settings(|current| {
+        current.codex_ssh_sync = settings;
+    })
+}
+
+pub fn update_codex_ssh_host_status(
+    host_id: &str,
+    last_sync_at: Option<i64>,
+    last_error: Option<String>,
+) -> Result<(), AppError> {
+    mutate_settings(|current| {
+        if let Some(sync) = current.codex_ssh_sync.as_mut() {
+            if let Some(host) = sync.hosts.iter_mut().find(|h| h.id == host_id) {
+                host.last_sync_at = last_sync_at;
+                host.last_error = last_error;
+            }
         }
     })
 }

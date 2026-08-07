@@ -322,6 +322,46 @@ export interface S3SyncSettings {
   status?: WebDavSyncStatus;
 }
 
+/** Codex SSH 远程主机：同步网关 config.toml + auth.json */
+export interface CodexSshHost {
+  id: string;
+  name?: string;
+  host: string;
+  port?: number;
+  user: string;
+  identityFile?: string;
+  /** SSH config Host 别名；Codex/Cursor 用此别名连接即可触发 LocalCommand 同步 */
+  sshAlias?: string;
+  remoteCodexDir?: string;
+  enabled?: boolean;
+  /** 本地切换供应商/网关后自动推送 */
+  autoSync?: boolean;
+  /** 每次 SSH 连接前通过 LocalCommand 自动同步 */
+  syncOnSshConnect?: boolean;
+  /** RemoteForward 本地代理端口到远程 127.0.0.1 */
+  forwardProxy?: boolean;
+  lastSyncAt?: number | null;
+  lastError?: string | null;
+}
+
+export interface CodexSshSyncSettings {
+  enabled?: boolean;
+  hosts?: CodexSshHost[];
+}
+
+export interface CodexSshSyncHostResult {
+  hostId: string;
+  host: string;
+  success: boolean;
+  message: string;
+  syncedFiles: string[];
+}
+
+export interface CodexSshSyncResult {
+  success: boolean;
+  results: CodexSshSyncHostResult[];
+}
+
 export type RemoteSnapshotLayout = "current" | "legacy";
 
 // 远端快照信息（下载前预览）
@@ -425,6 +465,9 @@ export interface Settings {
 
   // ===== S3 同步设置 =====
   s3Sync?: S3SyncSettings;
+
+  // ===== Codex SSH 远程同步（网关 + 认证）=====
+  codexSshSync?: CodexSshSyncSettings;
 
   // ===== 备份策略设置 =====
   // Auto-backup interval in hours (0=disabled, default 24)

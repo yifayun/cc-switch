@@ -3,6 +3,9 @@ import type {
   Settings,
   WebDavSyncSettings,
   S3SyncSettings,
+  CodexSshSyncSettings,
+  CodexSshHost,
+  CodexSshSyncResult,
   RemoteSnapshotInfo,
 } from "@/types";
 import type { AppId } from "./types";
@@ -200,6 +203,35 @@ export const settingsApi = {
 
   async s3SyncFetchRemoteInfo(): Promise<RemoteSnapshotInfo | { empty: true }> {
     return await invoke("s3_sync_fetch_remote_info");
+  },
+
+  // ===== Codex SSH Sync API =====
+
+  async codexSshSyncGetSettings(): Promise<CodexSshSyncSettings | null> {
+    return await invoke("codex_ssh_sync_get_settings");
+  },
+
+  async codexSshSyncSaveSettings(
+    settings: CodexSshSyncSettings,
+  ): Promise<{ success: boolean; settings: CodexSshSyncSettings }> {
+    return await invoke("codex_ssh_sync_save_settings", { settings });
+  },
+
+  async codexSshSyncNow(hostId?: string): Promise<CodexSshSyncResult> {
+    return await invoke("codex_ssh_sync_now", { hostId: hostId ?? null });
+  },
+
+  async codexSshSyncTestHost(
+    host: CodexSshHost,
+  ): Promise<{ success: boolean; message?: string }> {
+    return await invoke("codex_ssh_sync_test_host", { host });
+  },
+
+  async codexSshSyncInstallHooks(): Promise<{
+    success: boolean;
+    sshConfigInclude?: string;
+  }> {
+    return await invoke("codex_ssh_sync_install_hooks");
   },
 
   async syncCurrentProvidersLive(): Promise<void> {
