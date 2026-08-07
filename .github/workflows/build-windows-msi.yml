@@ -53,12 +53,28 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Disable updater signing for MSI-only build
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("src-tauri/tauri.conf.json")
+          conf = json.loads(path.read_text(encoding="utf-8"))
+          conf.setdefault("bundle", {})["createUpdaterArtifacts"] = False
+          # Keep MSI only for this workflow.
+          conf["bundle"]["targets"] = ["msi"]
+          path.write_text(json.dumps(conf, indent=2) + "\n", encoding="utf-8")
+          print("createUpdaterArtifacts=", conf["bundle"]["createUpdaterArtifacts"])
+          print("targets=", conf["bundle"]["targets"])
+          PY
+
       - name: Build Windows MSI x64
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # Skip updater signature artifacts so forks without TAURI signing secrets can still produce MSI.
-          pnpm tauri build --bundles msi --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}'
+          pnpm tauri build --bundles msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Prepare MSI asset
         id: asset
