@@ -108,8 +108,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish draft release with MSI
-        uses: softprops/action-gh-release@v2
+      - name: Publish release with MSI
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: build-msi-${{ steps.asset.outputs.version }}-${{ github.run_number }}
           name: Windows MSI x64 ${{ steps.asset.outputs.version }} (build ${{ github.run_number }})
