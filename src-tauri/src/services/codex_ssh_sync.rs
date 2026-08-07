@@ -245,15 +245,29 @@ fn ensure_persistent_askpass(host: &CodexSshHost) -> Result<Option<(PathBuf, Pat
     Ok(Some((script, pass)))
 }
 
+/// Options that strip ~/.ssh/config side-effects (RemoteForward / LocalCommand).
+/// Without these, sync/test ssh/scp match our Host block, try to re-bind proxy
+/// port 15721, spam "remote port forwarding failed", and often exit non-zero.
+fn ssh_ignore_config_side_effects() -> [String; 6] {
+    [
+        "-o".to_string(),
+        "ClearAllForwardings=yes".to_string(),
+        "-o".to_string(),
+        "ExitOnForwardFailure=no".to_string(),
+        "-o".to_string(),
+        "PermitLocalCommand=no".to_string(),
+    ]
+}
+
 fn build_ssh_base_args(host: &CodexSshHost) -> Vec<String> {
     let mut args = vec![
         "-o".to_string(),
         "StrictHostKeyChecking=accept-new".to_string(),
         "-o".to_string(),
         "ConnectTimeout=20".to_string(),
-        "-p".to_string(),
-        host.port.to_string(),
     ];
+    args.extend(ssh_ignore_config_side_effects());
+    args.extend(["-p".to_string(), host.port.to_string()]);
     if uses_password_auth(host) {
         args.extend([
             "-o".to_string(),
@@ -315,14 +329,29 @@ fn run_command(program: &Path, args: &[String], host: &CodexSshHost) -> Result<S
         )
     })?;
 
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    // Some OpenSSH builds exit non-zero solely due to forward warnings even when
+    // the remote command succeeded; accept stdout if the real work looks done.
     if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        return Ok(stdout);
+    }
+    if !stdout.is_empty()
+        && stderr.contains("remote port forwarding failed")
+        && stderr
+            .lines()
+            .all(|l| l.trim().is_empty() || l.contains("remote port forwarding failed"))
+    {
+        log::warn!(
+            "SSH exited {:?} with only port-forward warnings; treating as success",
+            output.status
+        );
+        return Ok(stdout);
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let detail = if !stderr.is_empty() {
-        stderr
+        tidy_ssh_error_detail(&stderr)
     } else if !stdout.is_empty() {
         stdout
     } else {
@@ -387,9 +416,9 @@ fn build_scp_base_args(host: &CodexSshHost) -> Vec<String> {
         "StrictHostKeyChecking=accept-new".to_string(),
         "-o".to_string(),
         "ConnectTimeout=20".to_string(),
-        "-P".to_string(),
-        host.port.to_string(),
     ];
+    args.extend(ssh_ignore_config_side_effects());
+    args.extend(["-P".to_string(), host.port.to_string()]);
     if uses_password_auth(host) {
         args.extend([
             "-o".to_string(),
@@ -410,6 +439,33 @@ fn build_scp_base_args(host: &CodexSshHost) -> Vec<String> {
         }
     }
     args
+}
+
+/// Collapse repeated OpenSSH forward warnings so UI lastError stays readable.
+fn tidy_ssh_error_detail(raw: &str) -> String {
+    let forward_warn = "remote port forwarding failed for listen port";
+    let mut forward_hits = 0usize;
+    let mut kept = Vec::new();
+    for line in raw.lines() {
+        if line.contains(forward_warn) {
+            forward_hits += 1;
+            continue;
+        }
+        let t = line.trim();
+        if !t.is_empty() {
+            kept.push(t.to_string());
+        }
+    }
+    if forward_hits > 0 {
+        kept.push(format!(
+            "远程端口转发失败（端口可能已被占用，已忽略 {forward_hits} 条重复警告；同步命令不应再触发转发）"
+        ));
+    }
+    if kept.is_empty() {
+        raw.chars().take(400).collect()
+    } else {
+        kept.join("\n")
+    }
 }
 
 fn remote_target(host: &CodexSshHost) -> String {
@@ -532,7 +588,7 @@ pub fn pull_remote_sessions(host: &CodexSshHost) -> Result<usize, AppError> {
     let used_rsync = if !uses_password_auth(host) {
         if let Some(rsync) = which_cmd("rsync") {
             let mut ssh_cmd = format!(
-                "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -p {}",
+                "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ClearAllForwardings=yes -o PermitLocalCommand=no -p {}",
                 host.port
             );
             if let Some(identity) = host_identity(host) {
@@ -865,20 +921,20 @@ fn write_helper_script(host: &CodexSshHost) -> Result<PathBuf, AppError> {
                 ask_script.display().to_string().replace('\'', "''")
             ));
             content.push_str(
-                "$sshOpts = @('-o','BatchMode=no','-o','StrictHostKeyChecking=accept-new','-o','PreferredAuthentications=password,keyboard-interactive','-o','PubkeyAuthentication=no','-o','NumberOfPasswordPrompts=1','-p',",
+                "$sshOpts = @('-o','BatchMode=no','-o','StrictHostKeyChecking=accept-new','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-o','PreferredAuthentications=password,keyboard-interactive','-o','PubkeyAuthentication=no','-o','NumberOfPasswordPrompts=1','-p',",
             );
             content.push_str(&format!("'{}')\n", host.port));
             content.push_str(
-                "$scpOpts = @('-o','BatchMode=no','-o','StrictHostKeyChecking=accept-new','-o','PreferredAuthentications=password,keyboard-interactive','-o','PubkeyAuthentication=no','-o','NumberOfPasswordPrompts=1','-P',",
+                "$scpOpts = @('-o','BatchMode=no','-o','StrictHostKeyChecking=accept-new','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-o','PreferredAuthentications=password,keyboard-interactive','-o','PubkeyAuthentication=no','-o','NumberOfPasswordPrompts=1','-P',",
             );
             content.push_str(&format!("'{}')\n", host.port));
         } else {
             content.push_str(
-                "$sshOpts = @('-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-p',",
+                "$sshOpts = @('-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-p',",
             );
             content.push_str(&format!("'{}')\n", host.port));
             content.push_str(
-                "$scpOpts = @('-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-P',",
+                "$scpOpts = @('-o','BatchMode=yes','-o','StrictHostKeyChecking=accept-new','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no','-P',",
             );
             content.push_str(&format!("'{}')\n", host.port));
             if let Some(id) = identity {
@@ -935,11 +991,11 @@ fn write_helper_script(host: &CodexSshHost) -> Result<PathBuf, AppError> {
                 shell_quote(&ask_script.display().to_string())
             ));
             content.push_str(&format!(
-                "SSH_OPTS=(-o BatchMode=no -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -p {port})\n",
+                "SSH_OPTS=(-o BatchMode=no -o StrictHostKeyChecking=accept-new -o ClearAllForwardings=yes -o PermitLocalCommand=no -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -p {port})\n",
                 port = host.port,
             ));
             content.push_str(&format!(
-                "SCP_OPTS=(-o BatchMode=no -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -P {port})\n",
+                "SCP_OPTS=(-o BatchMode=no -o StrictHostKeyChecking=accept-new -o ClearAllForwardings=yes -o PermitLocalCommand=no -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 -P {port})\n",
                 port = host.port,
             ));
         } else {
@@ -947,12 +1003,12 @@ fn write_helper_script(host: &CodexSshHost) -> Result<PathBuf, AppError> {
                 .map(|i| format!(" -i {} -o IdentitiesOnly=yes", shell_quote(i)))
                 .unwrap_or_default();
             content.push_str(&format!(
-                "SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p {port}{id_args})\n",
+                "SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ClearAllForwardings=yes -o PermitLocalCommand=no -p {port}{id_args})\n",
                 port = host.port,
                 id_args = id_args,
             ));
             content.push_str(&format!(
-                "SCP_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -P {port}{id_args})\n",
+                "SCP_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ClearAllForwardings=yes -o PermitLocalCommand=no -P {port}{id_args})\n",
                 port = host.port,
                 id_args = id_args,
             ));
@@ -1223,6 +1279,17 @@ mod tests {
     fn shell_quote_leaves_safe_tokens() {
         assert_eq!(shell_quote("root@1.2.3.4"), "root@1.2.3.4");
         assert!(shell_quote("a b").starts_with('\''));
+    }
+
+    #[test]
+    fn tidy_ssh_error_collapses_forward_spam() {
+        let raw = "Warning: remote port forwarding failed for listen port 15721\n\
+                   Warning: remote port forwarding failed for listen port 15721\n\
+                   Permission denied\n";
+        let tidy = tidy_ssh_error_detail(raw);
+        assert!(tidy.contains("Permission denied"));
+        assert!(tidy.contains("已忽略 2 条"));
+        assert_eq!(tidy.matches("remote port forwarding failed").count(), 0);
     }
 
     #[test]
