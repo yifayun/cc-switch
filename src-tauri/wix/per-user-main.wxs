@@ -26,10 +26,11 @@
                  Languages="0"
                  Compressed="yes"
                  InstallScope="perUser"
-                 InstallPrivileges="elevated"
+                 InstallPrivileges="limited"
                  SummaryCodepage="!(loc.TauriCodepage)"/>
 
-        <!-- Reduce Config.Msi rollback/ACL work that often fails with Error 5 on non-C drives -->
+        <!-- Reduce Config.Msi rollback/ACL work that often fails with Error 5 on non-C drives.
+             Keep InstallPrivileges=limited: WiX rejects elevated + perUser. -->
         <Property Id="MSIFASTINSTALL" Value="7" />
         <Property Id="DISABLEROLLBACK" Value="1" />
 

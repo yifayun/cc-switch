@@ -72,9 +72,20 @@ jobs:
       - name: Build Windows MSI x64
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          pnpm tauri build --bundles msi
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ErrorActionPreference = 'Continue'
+          pnpm tauri build --bundles msi 2>&1 | Tee-Object -FilePath build-msi.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Host '===== build-msi.log (last 250 lines) ====='
+            if (Test-Path build-msi.log) { Get-Content build-msi.log -Tail 250 }
+            # Also surface common Rust/WiX error files if present
+            Get-ChildItem -Path 'src-tauri/target' -Recurse -Filter '*.log' -ErrorAction SilentlyContinue |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 5 | ForEach-Object {
+                Write-Host "===== $($_.FullName) (tail) ====="
+                Get-Content $_.FullName -Tail 80 -ErrorAction SilentlyContinue
+              }
+            exit $code
+          }
 
       - name: Prepare MSI asset
         id: asset
