@@ -234,6 +234,13 @@ export const settingsApi = {
     return await invoke("codex_ssh_sync_install_hooks");
   },
 
+  /** Restart Cursor / VS Code / Claude Desktop for the given app target */
+  async restartEditorApp(
+    target: "claude" | "claude-desktop" | "codex",
+  ): Promise<string> {
+    return await invoke("restart_editor_app", { target });
+  },
+
   async syncCurrentProvidersLive(): Promise<void> {
     const result = (await invoke("sync_current_providers_live")) as {
       success?: boolean;

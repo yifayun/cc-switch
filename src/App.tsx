@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   Loader2,
   RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
@@ -1624,6 +1625,60 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
+                              {(
+                                [
+                                  ["claude", "editorRestart.claudeCode", "CC"],
+                                  [
+                                    "claude-desktop",
+                                    "editorRestart.claudeDesktop",
+                                    "CD",
+                                  ],
+                                  ["codex", "editorRestart.codex", "CX"],
+                                ] as const
+                              ).map(([target, titleKey, short]) => (
+                                <Button
+                                  key={target}
+                                  variant="ghost"
+                                  size="sm"
+                                  className={cn(
+                                    "text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 px-1.5 gap-0.5",
+                                    activeApp === target &&
+                                      "text-foreground bg-black/5 dark:bg-white/5",
+                                  )}
+                                  title={t(titleKey)}
+                                  onClick={() => {
+                                    void (async () => {
+                                      try {
+                                        const msg =
+                                          await settingsApi.restartEditorApp(
+                                            target,
+                                          );
+                                        toast.success(
+                                          t("editorRestart.success", {
+                                            app: t(titleKey),
+                                            detail: msg,
+                                          }),
+                                        );
+                                      } catch (error) {
+                                        toast.error(
+                                          t("editorRestart.failed", {
+                                            app: t(titleKey),
+                                            error:
+                                              error instanceof Error
+                                                ? error.message
+                                                : String(error),
+                                          }),
+                                        );
+                                      }
+                                    })();
+                                  }}
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span className="text-[10px] font-semibold leading-none">
+                                    {short}
+                                  </span>
+                                </Button>
+                              ))}
                             </>
                           )}
                         </motion.div>

@@ -24,7 +24,11 @@ pub async fn codex_ssh_sync_get_settings() -> Result<Option<CodexSshSyncSettings
 pub async fn codex_ssh_sync_save_settings(
     settings: CodexSshSyncSettings,
 ) -> Result<Value, String> {
-    let saved = sync_service::save_settings_and_hooks(settings).map_err(|e| e.to_string())?;
+    // Save also performs an immediate SSH sync; keep it off the async runtime.
+    let saved = tokio::task::spawn_blocking(move || sync_service::save_settings_and_hooks(settings))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
     Ok(json!({
         "success": true,
         "settings": saved,

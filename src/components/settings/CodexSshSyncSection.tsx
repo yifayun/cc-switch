@@ -8,6 +8,9 @@ import {
   UploadCloud,
   Cable,
   RefreshCw,
+  ChevronDown,
+  ChevronRight,
+  Info,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -49,16 +52,24 @@ export function CodexSshSyncSection({
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setEnabled(initial?.enabled ?? false);
-    setHosts(
-      (initial?.hosts ?? []).map((h) => ({
-        ...newHost(),
-        ...h,
-        port: h.port ?? 22,
-      })),
-    );
+    const nextHosts = (initial?.hosts ?? []).map((h) => ({
+      ...newHost(),
+      ...h,
+      port: h.port ?? 22,
+    }));
+    setHosts(nextHosts);
+    // Newly added empty hosts start expanded; existing stay collapsed for quick manage.
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      for (const h of nextHosts) {
+        if (!h.host?.trim()) next.add(h.id);
+      }
+      return next;
+    });
   }, [initial]);
 
   const draft = useMemo<CodexSshSyncSettings>(
@@ -87,6 +98,18 @@ export function CodexSshSyncSection({
     [],
   );
 
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const collapseAll = () => setExpandedIds(new Set());
+  const expandAll = () => setExpandedIds(new Set(hosts.map((h) => h.id)));
+
   const handleSave = async () => {
     if (enabled) {
       for (const host of draft.hosts ?? []) {
@@ -100,7 +123,14 @@ export function CodexSshSyncSection({
     try {
       const result = await settingsApi.codexSshSyncSaveSettings(draft);
       onSaved?.(result.settings);
-      toast.success(t("settings.codexSshSync.saveSuccess"));
+      const lastError = result.settings.hosts?.find((h) => h.lastError)?.lastError;
+      if (lastError) {
+        toast.warning(
+          t("settings.codexSshSync.saveOkSyncFailed", { error: lastError }),
+        );
+      } else {
+        toast.success(t("settings.codexSshSync.saveSuccess"));
+      }
     } catch (error) {
       toast.error(
         t("settings.codexSshSync.saveFailed", {
@@ -115,7 +145,6 @@ export function CodexSshSyncSection({
   const handleSyncNow = async (hostId?: string) => {
     setSyncing(true);
     try {
-      // Persist first so sync uses latest host list
       await settingsApi.codexSshSyncSaveSettings(draft);
       const result = await settingsApi.codexSshSyncNow(hostId);
       const failed = result.results.filter((r) => !r.success);
@@ -159,6 +188,12 @@ export function CodexSshSyncSection({
     }
   };
 
+  const handleAddHost = () => {
+    const host = newHost();
+    setHosts((prev) => [...prev, host]);
+    setExpandedIds((prev) => new Set(prev).add(host.id));
+  };
+
   return (
     <section className="space-y-4">
       <div className="flex items-center gap-2 pb-2 border-b border-border/40">
@@ -179,20 +214,59 @@ export function CodexSshSyncSection({
           <p className="text-xs text-muted-foreground leading-relaxed">
             {t("settings.codexSshSync.hint")}
           </p>
+          <div className="flex items-start gap-2 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5 mt-0.5 text-sky-500 shrink-0" />
+            <p>{t("settings.codexSshSync.deviceControlHint")}</p>
+          </div>
 
-          {hosts.map((host) => (
-            <div
-              key={host.id}
-              className="rounded-lg border border-border/60 p-4 space-y-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <Input
-                  value={host.name ?? ""}
-                  onChange={(e) => updateHost(host.id, { name: e.target.value })}
-                  placeholder={t("settings.codexSshSync.namePlaceholder")}
-                  className="max-w-xs"
-                />
-                <div className="flex items-center gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={collapseAll}>
+              {t("settings.codexSshSync.collapseAll")}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={expandAll}>
+              {t("settings.codexSshSync.expandAll")}
+            </Button>
+          </div>
+
+          {hosts.map((host) => {
+            const expanded = expandedIds.has(host.id);
+            const title = host.name?.trim() || host.host || t("settings.codexSshSync.namePlaceholder");
+            return (
+              <div
+                key={host.id}
+                className="rounded-lg border border-border/60 overflow-hidden"
+              >
+                <div className="flex items-center gap-2 px-3 py-2 bg-muted/30">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => toggleExpanded(host.id)}
+                    title={
+                      expanded
+                        ? t("settings.codexSshSync.collapse")
+                        : t("settings.codexSshSync.expand")
+                    }
+                  >
+                    {expanded ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </Button>
+                  <button
+                    type="button"
+                    className="flex-1 text-left text-sm font-medium truncate"
+                    onClick={() => toggleExpanded(host.id)}
+                  >
+                    {title}
+                    {host.host ? (
+                      <span className="ml-2 text-xs text-muted-foreground font-normal">
+                        {host.user}@{host.host}:{host.port ?? 22}
+                      </span>
+                    ) : null}
+                  </button>
                   <Switch
                     checked={host.enabled ?? true}
                     onCheckedChange={(v) => updateHost(host.id, { enabled: v })}
@@ -201,6 +275,18 @@ export function CodexSshSyncSection({
                     type="button"
                     variant="ghost"
                     size="icon"
+                    className="h-7 w-7"
+                    disabled={syncing}
+                    onClick={() => void handleSyncNow(host.id)}
+                    title={t("settings.codexSshSync.syncOne")}
+                  >
+                    <UploadCloud className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() =>
                       setHosts((prev) => prev.filter((h) => h.id !== host.id))
                     }
@@ -208,169 +294,189 @@ export function CodexSshSyncSection({
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
-                    {t("settings.codexSshSync.host")}
-                  </label>
-                  <Input
-                    value={host.host}
-                    onChange={(e) =>
-                      updateHost(host.id, { host: e.target.value })
-                    }
-                    placeholder="154.201.64.118"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
-                    {t("settings.codexSshSync.user")}
-                  </label>
-                  <Input
-                    value={host.user}
-                    onChange={(e) =>
-                      updateHost(host.id, { user: e.target.value })
-                    }
-                    placeholder="root"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
-                    {t("settings.codexSshSync.port")}
-                  </label>
-                  <Input
-                    type="number"
-                    value={host.port ?? 22}
-                    onChange={(e) =>
-                      updateHost(host.id, {
-                        port: Number(e.target.value) || 22,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
-                    {t("settings.codexSshSync.sshAlias")}
-                  </label>
-                  <Input
-                    value={host.sshAlias ?? ""}
-                    onChange={(e) =>
-                      updateHost(host.id, { sshAlias: e.target.value })
-                    }
-                    placeholder="my-codex-server"
-                  />
-                </div>
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="text-xs text-muted-foreground">
-                    {t("settings.codexSshSync.identityFile")}
-                  </label>
-                  <Input
-                    value={host.identityFile ?? ""}
-                    onChange={(e) =>
-                      updateHost(host.id, { identityFile: e.target.value })
-                    }
-                    placeholder="~/.ssh/id_rsa"
-                  />
-                </div>
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="text-xs text-muted-foreground">
-                    {t("settings.codexSshSync.remoteCodexDir")}
-                  </label>
-                  <Input
-                    value={host.remoteCodexDir ?? "~/.codex"}
-                    onChange={(e) =>
-                      updateHost(host.id, { remoteCodexDir: e.target.value })
-                    }
-                  />
-                </div>
-              </div>
+                {expanded ? (
+                  <div className="p-4 space-y-3 border-t border-border/50">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.namePlaceholder")}
+                        </label>
+                        <Input
+                          value={host.name ?? ""}
+                          onChange={(e) =>
+                            updateHost(host.id, { name: e.target.value })
+                          }
+                          placeholder={t("settings.codexSshSync.namePlaceholder")}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.host")}
+                        </label>
+                        <Input
+                          value={host.host}
+                          onChange={(e) =>
+                            updateHost(host.id, { host: e.target.value })
+                          }
+                          placeholder="154.201.64.118"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.user")}
+                        </label>
+                        <Input
+                          value={host.user}
+                          onChange={(e) =>
+                            updateHost(host.id, { user: e.target.value })
+                          }
+                          placeholder="root"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.port")}
+                        </label>
+                        <Input
+                          type="number"
+                          value={host.port ?? 22}
+                          onChange={(e) =>
+                            updateHost(host.id, {
+                              port: Number(e.target.value) || 22,
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.sshAlias")}
+                        </label>
+                        <Input
+                          value={host.sshAlias ?? ""}
+                          onChange={(e) =>
+                            updateHost(host.id, { sshAlias: e.target.value })
+                          }
+                          placeholder="my-codex-server"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.identityFile")}
+                        </label>
+                        <Input
+                          value={host.identityFile ?? ""}
+                          onChange={(e) =>
+                            updateHost(host.id, { identityFile: e.target.value })
+                          }
+                          placeholder="D:\\sshkey\\id_ed25519"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.remoteCodexDir")}
+                        </label>
+                        <Input
+                          value={host.remoteCodexDir ?? "~/.codex"}
+                          onChange={(e) =>
+                            updateHost(host.id, {
+                              remoteCodexDir: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
 
-              <div className="flex flex-col gap-2 text-xs">
-                <label className="flex items-center justify-between gap-3">
-                  <span>{t("settings.codexSshSync.autoSync")}</span>
-                  <Switch
-                    checked={host.autoSync ?? true}
-                    onCheckedChange={(v) =>
-                      updateHost(host.id, { autoSync: v })
-                    }
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-3">
-                  <span>{t("settings.codexSshSync.syncOnConnect")}</span>
-                  <Switch
-                    checked={host.syncOnSshConnect ?? true}
-                    onCheckedChange={(v) =>
-                      updateHost(host.id, { syncOnSshConnect: v })
-                    }
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-3">
-                  <span>{t("settings.codexSshSync.forwardProxy")}</span>
-                  <Switch
-                    checked={host.forwardProxy ?? true}
-                    onCheckedChange={(v) =>
-                      updateHost(host.id, { forwardProxy: v })
-                    }
-                  />
-                </label>
-              </div>
+                    <div className="flex flex-col gap-2 text-xs">
+                      <label className="flex items-center justify-between gap-3">
+                        <span>{t("settings.codexSshSync.autoSync")}</span>
+                        <Switch
+                          checked={host.autoSync ?? true}
+                          onCheckedChange={(v) =>
+                            updateHost(host.id, { autoSync: v })
+                          }
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3">
+                        <span>{t("settings.codexSshSync.syncOnConnect")}</span>
+                        <Switch
+                          checked={host.syncOnSshConnect ?? true}
+                          onCheckedChange={(v) =>
+                            updateHost(host.id, { syncOnSshConnect: v })
+                          }
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-3">
+                        <span>{t("settings.codexSshSync.forwardProxy")}</span>
+                        <Switch
+                          checked={host.forwardProxy ?? true}
+                          onCheckedChange={(v) =>
+                            updateHost(host.id, { forwardProxy: v })
+                          }
+                        />
+                      </label>
+                    </div>
 
-              {(host.lastError || host.lastSyncAt) && (
-                <p className="text-xs text-muted-foreground">
-                  {host.lastError
-                    ? t("settings.codexSshSync.lastError", {
-                        error: host.lastError,
-                      })
-                    : t("settings.codexSshSync.lastSync", {
-                        time: new Date(host.lastSyncAt ?? 0).toLocaleString(),
-                      })}
-                </p>
-              )}
+                    {(host.lastError || host.lastSyncAt) && (
+                      <p className="text-xs text-muted-foreground">
+                        {host.lastError
+                          ? t("settings.codexSshSync.lastError", {
+                              error: host.lastError,
+                            })
+                          : t("settings.codexSshSync.lastSync", {
+                              time: new Date(
+                                host.lastSyncAt ?? 0,
+                              ).toLocaleString(),
+                            })}
+                      </p>
+                    )}
 
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={testingId === host.id}
-                  onClick={() => handleTest(host)}
-                >
-                  {testingId === host.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Cable className="h-3.5 w-3.5" />
-                  )}
-                  <span className="ml-1.5">
-                    {t("settings.codexSshSync.test")}
-                  </span>
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={syncing}
-                  onClick={() => handleSyncNow(host.id)}
-                >
-                  {syncing ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <UploadCloud className="h-3.5 w-3.5" />
-                  )}
-                  <span className="ml-1.5">
-                    {t("settings.codexSshSync.syncOne")}
-                  </span>
-                </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={testingId === host.id}
+                        onClick={() => handleTest(host)}
+                      >
+                        {testingId === host.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Cable className="h-3.5 w-3.5" />
+                        )}
+                        <span className="ml-1.5">
+                          {t("settings.codexSshSync.test")}
+                        </span>
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={syncing}
+                        onClick={() => handleSyncNow(host.id)}
+                      >
+                        {syncing ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <UploadCloud className="h-3.5 w-3.5" />
+                        )}
+                        <span className="ml-1.5">
+                          {t("settings.codexSshSync.syncOne")}
+                        </span>
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setHosts((prev) => [...prev, newHost()])}
+              onClick={handleAddHost}
             >
               <Plus className="h-3.5 w-3.5 mr-1.5" />
               {t("settings.codexSshSync.addHost")}

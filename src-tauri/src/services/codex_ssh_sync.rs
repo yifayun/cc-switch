@@ -190,20 +190,16 @@ fn run_command(program: &Path, args: &[String]) -> Result<String, AppError> {
 
 fn local_files_to_sync() -> Result<Vec<(PathBuf, String)>, AppError> {
     let config = get_codex_config_path();
-    if !config.is_file() {
-        return Err(AppError::localized(
-            "codex_ssh_sync.config_missing",
-            format!("本地缺少 Codex 网关配置: {}", config.display()),
-            format!("Local Codex config missing: {}", config.display()),
-        ));
-    }
-
-    let mut files = vec![(config, "config.toml".to_string())];
     let auth = get_codex_auth_path();
-    if auth.is_file() {
-        files.push((auth, "auth.json".to_string()));
-    }
     let catalog = get_codex_model_catalog_path();
+
+    let mut files = Vec::new();
+    if config.is_file() {
+        files.push((config, "config.toml".to_string()));
+    }
+    if auth.is_file() {
+        files.push((auth.clone(), "auth.json".to_string()));
+    }
     if catalog.is_file() {
         let name = catalog
             .file_name()
@@ -211,6 +207,29 @@ fn local_files_to_sync() -> Result<Vec<(PathBuf, String)>, AppError> {
             .unwrap_or("cc-switch-model-catalog.json")
             .to_string();
         files.push((catalog, name));
+    }
+
+    if files.is_empty() {
+        return Err(AppError::localized(
+            "codex_ssh_sync.local_missing",
+            format!(
+                "本地没有可同步的 Codex 文件。请先在本机完成「登录 Codex」，或在 CC Switch 切换/接管 Codex 供应商以生成 {} / {}",
+                get_codex_config_path().display(),
+                get_codex_auth_path().display()
+            ),
+            format!(
+                "No local Codex files to sync. Sign in to Codex locally first, or switch/take over a Codex provider in CC Switch so {} / {} exist.",
+                get_codex_config_path().display(),
+                get_codex_auth_path().display()
+            ),
+        ));
+    }
+
+    if !auth.is_file() {
+        log::warn!(
+            "Codex SSH sync: auth.json missing at {}; remote may still show login required",
+            get_codex_auth_path().display()
+        );
     }
     Ok(files)
 }
@@ -242,6 +261,212 @@ fn remote_target(host: &CodexSshHost) -> String {
     format!("{}@{}", host.user, host.host)
 }
 
+/// Ensure Codex CLI exists on the remote host (npm/pnpm global install).
+fn ensure_remote_codex_cli(ssh: &Path, host: &CodexSshHost) -> Result<String, AppError> {
+    let target = remote_target(host);
+    let install_script = r#"
+set -e
+export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+# Load common Node version managers when present.
+[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
+[ -s "$HOME/.local/share/fnm/fnm" ] && eval "$("$HOME/.local/share/fnm/fnm" env)"
+if command -v codex >/dev/null 2>&1; then
+  echo "ALREADY:$(command -v codex)"
+  exit 0
+fi
+if command -v npm >/dev/null 2>&1; then
+  npm install -g @openai/codex >/tmp/cc-switch-codex-install.log 2>&1
+  command -v codex >/dev/null 2>&1 && echo "INSTALLED_NPM:$(command -v codex)" && exit 0
+fi
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm add -g @openai/codex >/tmp/cc-switch-codex-install.log 2>&1
+  command -v codex >/dev/null 2>&1 && echo "INSTALLED_PNPM:$(command -v codex)" && exit 0
+fi
+if command -v bun >/dev/null 2>&1; then
+  bun add -g @openai/codex >/tmp/cc-switch-codex-install.log 2>&1
+  command -v codex >/dev/null 2>&1 && echo "INSTALLED_BUN:$(command -v codex)" && exit 0
+fi
+echo "MISSING_NODE_OR_INSTALL_FAILED"
+exit 2
+"#;
+    let mut args = build_ssh_base_args(host);
+    args.push(target);
+    args.push(format!("bash -lc {}", shell_quote(install_script.trim())));
+    let out = run_command(ssh, &args)?;
+    if out.contains("ALREADY:") || out.contains("INSTALLED_") {
+        Ok(out)
+    } else {
+        Err(AppError::localized(
+            "codex_ssh_sync.cli_install_failed",
+            format!(
+                "远程未安装 Codex CLI，且自动安装失败（需要 npm/pnpm）。输出: {out}"
+            ),
+            format!(
+                "Remote Codex CLI missing and auto-install failed (npm/pnpm required). Output: {out}"
+            ),
+        ))
+    }
+}
+
+/// Enable Codex remote-control features on the remote config (device control / phone).
+fn ensure_remote_control_features(
+    ssh: &Path,
+    host: &CodexSshHost,
+    remote_dir: &str,
+) -> Result<(), AppError> {
+    let target = remote_target(host);
+    // Keep this shell-only so remotes without python3 still work.
+    let patch = format!(
+        r#"
+set -e
+CFG={cfg}
+mkdir -p "$(dirname "$CFG")"
+touch "$CFG"
+if ! grep -q '^\[features\]' "$CFG" 2>/dev/null; then
+  printf '\n[features]\nremote_connections = true\nremote_control = true\n' >> "$CFG"
+else
+  grep -q '^remote_connections' "$CFG" || sed -i '/^\[features\]/a remote_connections = true' "$CFG"
+  grep -q '^remote_control' "$CFG" || sed -i '/^\[features\]/a remote_control = true' "$CFG"
+  sed -i 's/^remote_connections.*/remote_connections = true/' "$CFG"
+  sed -i 's/^remote_control.*/remote_control = true/' "$CFG"
+fi
+echo FEATURES_OK
+"#,
+        cfg = shell_quote(&format!("{remote_dir}/config.toml")),
+    );
+    let mut args = build_ssh_base_args(host);
+    args.push(target);
+    args.push(format!("bash -lc {}", shell_quote(patch.trim())));
+    let _ = run_command(ssh, &args);
+    Ok(())
+}
+
+pub fn remote_sessions_cache_dir(host_id: &str) -> PathBuf {
+    get_app_config_dir()
+        .join("remote-codex-sessions")
+        .join(host_id)
+}
+
+/// Pull remote ~/.codex/sessions into a local cache for usage accounting.
+pub fn pull_remote_sessions(host: &CodexSshHost) -> Result<usize, AppError> {
+    let (ssh, scp) = require_ssh_tools()?;
+    let target = remote_target(host);
+    let remote_dir = if host.remote_codex_dir.trim().is_empty() {
+        "~/.codex"
+    } else {
+        host.remote_codex_dir.trim()
+    };
+    let cache = remote_sessions_cache_dir(&host.id);
+    let sessions_cache = cache.join("sessions");
+    fs::create_dir_all(&sessions_cache).map_err(|e| AppError::io(&sessions_cache, e))?;
+
+    // Ensure remote sessions dir exists (empty is fine).
+    let mut check_args = build_ssh_base_args(host);
+    check_args.push(target.clone());
+    check_args.push(format!(
+        "mkdir -p {d}/sessions; if [ -d {d}/sessions ]; then echo HAS_SESSIONS; else echo NO_SESSIONS; fi",
+        d = shell_quote(remote_dir)
+    ));
+    let check = run_command(&ssh, &check_args)?;
+    if !check.contains("HAS_SESSIONS") {
+        return Ok(0);
+    }
+
+    // Prefer rsync when available (incremental); fall back to scp -r.
+    if let Some(rsync) = which_cmd("rsync") {
+        let mut ssh_cmd = format!("ssh -o BatchMode=yes -p {}", host.port);
+        if let Some(identity) = host
+            .identity_file
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            ssh_cmd.push_str(&format!(" -i {}", shell_quote(identity)));
+        }
+        let rsync_args = vec![
+            "-az".into(),
+            "-e".into(),
+            ssh_cmd,
+            format!("{target}:{remote_dir}/sessions/"),
+            format!("{}/", sessions_cache.display()),
+        ];
+        let _ = run_command(&rsync, &rsync_args);
+    } else {
+        // scp -r copies the folder itself; stage then move.
+        let staging = cache.join("_staging");
+        let _ = fs::remove_dir_all(&staging);
+        fs::create_dir_all(&staging).map_err(|e| AppError::io(&staging, e))?;
+        let mut args = build_scp_base_args(host);
+        args.insert(0, "-r".to_string());
+        args.push(format!("{target}:{remote_dir}/sessions"));
+        args.push(staging.display().to_string());
+        run_command(&scp, &args)?;
+        let copied = staging.join("sessions");
+        if copied.is_dir() {
+            let _ = fs::remove_dir_all(&sessions_cache);
+            fs::rename(&copied, &sessions_cache).map_err(|e| AppError::io(&sessions_cache, e))?;
+        }
+        let _ = fs::remove_dir_all(&staging);
+    }
+
+    // Count jsonl files
+    let mut count = 0usize;
+    let mut stack = vec![sessions_cache];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                    count += 1;
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
+pub fn pull_remote_sessions_for_usage() -> usize {
+    let Some(settings) = settings::get_codex_ssh_sync_settings() else {
+        return 0;
+    };
+    if !settings.enabled {
+        return 0;
+    }
+    let mut total = 0usize;
+    for host in settings.hosts.iter().filter(|h| h.enabled) {
+        match pull_remote_sessions(host) {
+            Ok(n) => {
+                total += n;
+                log::info!(
+                    "Pulled {n} remote Codex session files from {}",
+                    host.host
+                );
+            }
+            Err(e) => log::warn!(
+                "Pull remote Codex sessions from {} failed: {e}",
+                host.host
+            ),
+        }
+    }
+    total
+}
+
+pub fn list_remote_session_cache_roots() -> Vec<PathBuf> {
+    let root = get_app_config_dir().join("remote-codex-sessions");
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let sessions = entry.path().join("sessions");
+            if sessions.is_dir() {
+                out.push(entry.path());
+            }
+        }
+    }
+    out
+}
+
 pub fn sync_host(host: &CodexSshHost) -> Result<CodexSshSyncHostResult, AppError> {
     let (ssh, scp) = require_ssh_tools()?;
     let files = local_files_to_sync()?;
@@ -253,6 +478,9 @@ pub fn sync_host(host: &CodexSshHost) -> Result<CodexSshSyncHostResult, AppError
         remote_dir
     };
 
+    // 1) Install Codex CLI when missing (fixes "未安装 Codex CLI")
+    let cli_status = ensure_remote_codex_cli(&ssh, host)?;
+
     let mut ssh_args = build_ssh_base_args(host);
     ssh_args.push(target.clone());
     ssh_args.push(format!(
@@ -262,6 +490,7 @@ pub fn sync_host(host: &CodexSshHost) -> Result<CodexSshSyncHostResult, AppError
     ));
     run_command(&ssh, &ssh_args)?;
 
+    // 2) Replace gateway + auth files
     let mut synced_files = Vec::new();
     for (local_path, remote_name) in &files {
         let mut args = build_scp_base_args(host);
@@ -281,10 +510,15 @@ pub fn sync_host(host: &CodexSshHost) -> Result<CodexSshSyncHostResult, AppError
     ));
     let _ = run_command(&ssh, &chmod_args);
 
+    // 3) Enable remote-control features for phone/device control
+    let _ = ensure_remote_control_features(&ssh, host, remote_dir);
+
+    // 4) Pull sessions for usage stats (best effort)
+    let pulled = pull_remote_sessions(host).unwrap_or(0);
+
     let message = format!(
-        "已同步 {} 个文件到 {target}:{}",
+        "CLI:{cli_status}; 已同步 {} 个文件到 {target}:{remote_dir}; 拉取会话 {pulled} 个",
         synced_files.len(),
-        remote_dir
     );
     update_codex_ssh_host_status(&host.id, Some(now_epoch_ms()), None)?;
 
@@ -615,12 +849,23 @@ fn ensure_ssh_config_include(ssh_dir: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn render_ssh_host_block(host: &CodexSshHost, script_path: &Path, proxy_port: u16) -> String {
+fn render_ssh_host_patterns(host: &CodexSshHost) -> String {
     let alias = host.resolve_alias();
+    let raw_host = host.host.trim();
+    // Match both the friendly alias and the raw IP/hostname Cursor/Codex often use.
+    if alias == raw_host || raw_host.is_empty() {
+        alias
+    } else {
+        format!("{alias} {raw_host}")
+    }
+}
+
+fn render_ssh_host_block(host: &CodexSshHost, script_path: &Path, proxy_port: u16) -> String {
+    let patterns = render_ssh_host_patterns(host);
     let mut block = String::new();
     block.push_str(&format!("# BEGIN CC-SWITCH CODEX SSH SYNC {}\n", host.id));
-    block.push_str(&format!("Host {alias}\n"));
-    block.push_str(&format!("  HostName {}\n", host.host));
+    block.push_str(&format!("Host {patterns}\n"));
+    block.push_str(&format!("  HostName {}\n", host.host.trim()));
     block.push_str(&format!("  User {}\n", host.user));
     if host.port != 22 {
         block.push_str(&format!("  Port {}\n", host.port));
@@ -629,10 +874,12 @@ fn render_ssh_host_block(host: &CodexSshHost, script_path: &Path, proxy_port: u1
     {
         block.push_str(&format!("  IdentityFile {identity}\n"));
     }
+    // Cursor/Codex may invoke OpenSSH without an interactive TTY; keep LocalCommand on.
     if host.sync_on_ssh_connect {
         block.push_str("  PermitLocalCommand yes\n");
         #[cfg(windows)]
         {
+            // `%n` is the original host name used on the command line.
             block.push_str(&format!(
                 "  LocalCommand \"{}\"\n",
                 script_path.display().to_string().replace('\\', "/")
@@ -729,7 +976,36 @@ pub fn save_settings_and_hooks(
     settings.validate()?;
     install_connect_hooks(&settings)?;
     settings::set_codex_ssh_sync_settings(Some(settings.clone()))?;
-    Ok(settings)
+    // Saving should immediately push gateway + auth, instead of waiting for the
+    // next SSH connect (Codex "重启连接" may not run OpenSSH LocalCommand).
+    if settings.enabled {
+        let hosts: Vec<_> = settings
+            .hosts
+            .iter()
+            .filter(|h| h.enabled && h.auto_sync)
+            .cloned()
+            .collect();
+        if !hosts.is_empty() {
+            let result = sync_hosts(&hosts);
+            for item in &result.results {
+                if item.success {
+                    log::info!(
+                        "Codex SSH sync after save ok host={} files={:?}",
+                        item.host,
+                        item.synced_files
+                    );
+                } else {
+                    log::warn!(
+                        "Codex SSH sync after save failed host={}: {}",
+                        item.host,
+                        item.message
+                    );
+                }
+            }
+        }
+    }
+    // Reload settings so lastSyncAt / lastError from sync are visible to UI.
+    Ok(settings::get_codex_ssh_sync_settings().unwrap_or(settings))
 }
 
 #[cfg(test)]

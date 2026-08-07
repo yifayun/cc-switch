@@ -650,8 +650,20 @@ struct CodexFileSyncResult {
 
 /// 同步 Codex 使用数据（从 JSONL 会话日志）
 pub fn sync_codex_usage(db: &Database) -> Result<SessionSyncResult, AppError> {
+    // Best-effort: pull SSH remote ~/.codex/sessions into local cache so remote
+    // token usage is visible in CC Switch stats.
+    let pulled = crate::services::codex_ssh_sync::pull_remote_sessions_for_usage();
+    if pulled > 0 {
+        log::info!("[CODEX-SYNC] pulled {pulled} remote SSH session files before import");
+    }
+
     let codex_dir = get_codex_config_dir();
-    let files = collect_codex_session_files(&codex_dir);
+    let mut files = collect_codex_session_files(&codex_dir);
+    for remote_root in crate::services::codex_ssh_sync::list_remote_session_cache_roots() {
+        files.extend(collect_codex_session_files(&remote_root));
+    }
+    files.sort();
+    files.dedup();
     let rollout_index = build_rollout_index(&files);
     let mut pass = CodexSyncPass::load(db)?;
 
