@@ -17,7 +17,10 @@ fn not_configured() -> String {
 
 #[tauri::command]
 pub async fn codex_ssh_sync_get_settings() -> Result<Option<CodexSshSyncSettings>, String> {
-    Ok(settings::get_codex_ssh_sync_settings())
+    Ok(settings::get_codex_ssh_sync_settings().map(|mut s| {
+        settings::redact_codex_ssh_passwords(&mut s);
+        s
+    }))
 }
 
 #[tauri::command]
@@ -29,9 +32,11 @@ pub async fn codex_ssh_sync_save_settings(
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+    let mut for_frontend = saved;
+    settings::redact_codex_ssh_passwords(&mut for_frontend);
     Ok(json!({
         "success": true,
-        "settings": saved,
+        "settings": for_frontend,
     }))
 }
 
@@ -76,7 +81,27 @@ pub async fn codex_ssh_sync_now(
 }
 
 #[tauri::command]
-pub async fn codex_ssh_sync_test_host(host: CodexSshHost) -> Result<Value, String> {
+pub async fn codex_ssh_sync_test_host(mut host: CodexSshHost) -> Result<Value, String> {
+    // Frontend redacts passwords; restore saved password when the field is empty.
+    let incoming_empty = host
+        .password
+        .as_ref()
+        .map(|p| p.is_empty())
+        .unwrap_or(true);
+    if incoming_empty {
+        if let Some(saved) = settings::get_codex_ssh_sync_settings() {
+            if let Some(old) = saved.hosts.iter().find(|h| h.id == host.id) {
+                let using_identity = host
+                    .identity_file
+                    .as_ref()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                if !using_identity {
+                    host.password = old.password.clone();
+                }
+            }
+        }
+    }
     let message = tokio::task::spawn_blocking(move || sync_service::test_host_connection(&host))
         .await
         .map_err(|e| e.to_string())?

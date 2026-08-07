@@ -459,6 +459,8 @@ mod tests {
                     port: 22,
                     user: "root".into(),
                     identity_file: None,
+                    password: None,
+                    has_password: None,
                     ssh_alias: Some("mysrv".into()),
                     remote_codex_dir: "~/.codex".into(),
                     enabled: true,

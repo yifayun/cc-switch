@@ -26,8 +26,12 @@
                  Languages="0"
                  Compressed="yes"
                  InstallScope="perUser"
-                 InstallPrivileges="limited"
+                 InstallPrivileges="elevated"
                  SummaryCodepage="!(loc.TauriCodepage)"/>
+
+        <!-- Reduce Config.Msi rollback/ACL work that often fails with Error 5 on non-C drives -->
+        <Property Id="MSIFASTINSTALL" Value="7" />
+        <Property Id="DISABLEROLLBACK" Value="1" />
 
         <!-- https://docs.microsoft.com/en-us/windows/win32/msi/reinstallmode -->
         <!-- reinstall all files; rewrite all registry entries; reinstall all shortcuts -->

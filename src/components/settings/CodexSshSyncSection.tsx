@@ -28,6 +28,8 @@ function newHost(): CodexSshHost {
     port: 22,
     user: "root",
     identityFile: "",
+    password: "",
+    hasPassword: false,
     sshAlias: "",
     remoteCodexDir: "~/.codex",
     enabled: true,
@@ -82,6 +84,10 @@ export function CodexSshSyncSection({
         user: h.user.trim(),
         port: h.port && h.port > 0 ? h.port : 22,
         identityFile: h.identityFile?.trim() || undefined,
+        // 空密码 = 保持后端已保存的密码；填了私钥则不用密码
+        password: h.identityFile?.trim()
+          ? undefined
+          : h.password?.trim() || undefined,
         sshAlias: h.sshAlias?.trim() || undefined,
         remoteCodexDir: h.remoteCodexDir?.trim() || "~/.codex",
       })),
@@ -367,10 +373,44 @@ export function CodexSshSyncSection({
                         <Input
                           value={host.identityFile ?? ""}
                           onChange={(e) =>
-                            updateHost(host.id, { identityFile: e.target.value })
+                            updateHost(host.id, {
+                              identityFile: e.target.value,
+                              // 密钥与密码二选一
+                              ...(e.target.value.trim()
+                                ? { password: "", hasPassword: false }
+                                : {}),
+                            })
                           }
                           placeholder="D:\\sshkey\\id_ed25519"
+                          disabled={!!host.password?.trim()}
                         />
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-xs text-muted-foreground">
+                          {t("settings.codexSshSync.password")}
+                        </label>
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          value={host.password ?? ""}
+                          onChange={(e) =>
+                            updateHost(host.id, {
+                              password: e.target.value,
+                              ...(e.target.value.trim()
+                                ? { identityFile: "" }
+                                : {}),
+                            })
+                          }
+                          placeholder={
+                            host.hasPassword && !host.password?.trim()
+                              ? t("settings.codexSshSync.passwordSaved")
+                              : t("settings.codexSshSync.passwordPlaceholder")
+                          }
+                          disabled={!!host.identityFile?.trim()}
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          {t("settings.codexSshSync.authHint")}
+                        </p>
                       </div>
                       <div className="space-y-1 sm:col-span-2">
                         <label className="text-xs text-muted-foreground">

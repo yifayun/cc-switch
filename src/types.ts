@@ -330,6 +330,10 @@ export interface CodexSshHost {
   port?: number;
   user: string;
   identityFile?: string;
+  /** SSH 密码（与私钥二选一；有私钥时优先私钥） */
+  password?: string;
+  /** 后端已保存密码（前端展示用，不回传明文） */
+  hasPassword?: boolean;
   /** SSH config Host 别名；Codex/Cursor 用此别名连接即可触发 LocalCommand 同步 */
   sshAlias?: string;
   remoteCodexDir?: string;

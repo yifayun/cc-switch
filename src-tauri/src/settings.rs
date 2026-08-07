@@ -746,8 +746,57 @@ pub fn get_settings_for_frontend() -> AppSettings {
     if let Some(s3) = &mut settings.s3_sync {
         s3.secret_access_key.clear();
     }
+    if let Some(ssh) = &mut settings.codex_ssh_sync {
+        redact_codex_ssh_passwords(ssh);
+    }
     settings.webdav_backup = None;
     settings
+}
+
+/// 清空密码字段，并用 has_password 告知前端是否已保存。
+pub fn redact_codex_ssh_passwords(settings: &mut CodexSshSyncSettings) {
+    for host in &mut settings.hosts {
+        let has = host
+            .password
+            .as_ref()
+            .map(|p| !p.is_empty())
+            .unwrap_or(false);
+        host.has_password = Some(has);
+        host.password = None;
+    }
+}
+
+/// 保存时：前端传空密码表示「保持原密码」。
+pub fn merge_codex_ssh_passwords(
+    incoming: &mut CodexSshSyncSettings,
+    existing: Option<&CodexSshSyncSettings>,
+) {
+    let Some(existing) = existing else {
+        return;
+    };
+    for host in &mut incoming.hosts {
+        let incoming_empty = host
+            .password
+            .as_ref()
+            .map(|p| p.is_empty())
+            .unwrap_or(true);
+        if !incoming_empty {
+            continue;
+        }
+        if let Some(old) = existing.hosts.iter().find(|h| h.id == host.id) {
+            // 若本次改用私钥，则丢弃旧密码
+            let using_identity = host
+                .identity_file
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            if using_identity {
+                host.password = None;
+            } else {
+                host.password = old.password.clone();
+            }
+        }
+    }
 }
 
 pub fn update_settings(mut new_settings: AppSettings) -> Result<(), AppError> {
@@ -1173,6 +1222,12 @@ pub struct CodexSshHost {
     pub user: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity_file: Option<String>,
+    /// SSH 密码（与私钥二选一；有私钥时优先私钥）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    /// 仅前端展示：是否已保存密码（不落盘）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_password: Option<bool>,
     /// SSH config Host 别名；Codex / Cursor 连接时用这个名字即可触发 LocalCommand 同步
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ssh_alias: Option<String>,
@@ -1223,6 +1278,22 @@ impl CodexSshHost {
                 *identity = trimmed;
             }
         }
+        if let Some(password) = self.password.as_mut() {
+            if password.is_empty() {
+                self.password = None;
+            }
+        }
+        // 密钥优先：配置了私钥时不使用密码
+        if self
+            .identity_file
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            self.password = None;
+        }
+        // has_password 仅 API 展示，不参与持久化逻辑
+        self.has_password = None;
         if self.name.is_empty() {
             self.name = self.host.clone();
         }
