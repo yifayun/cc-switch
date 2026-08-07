@@ -113,7 +113,7 @@ jobs:
         with:
           tag_name: build-msi-${{ steps.asset.outputs.version }}-${{ github.run_number }}
           name: Windows MSI x64 ${{ steps.asset.outputs.version }} (build ${{ github.run_number }})
-          draft: true
+          draft: false
           prerelease: true
           files: release-assets/*
           body: |
