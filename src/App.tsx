@@ -1625,43 +1625,36 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              {(
-                                [
-                                  ["claude", "editorRestart.claudeCode", "CC"],
-                                  [
-                                    "claude-desktop",
-                                    "editorRestart.claudeDesktop",
-                                    "CD",
-                                  ],
-                                  ["codex", "editorRestart.codex", "CX"],
-                                ] as const
-                              ).map(([target, titleKey, short]) => (
+                              {(activeApp === "claude" ||
+                                activeApp === "claude-desktop" ||
+                                activeApp === "codex") && (
                                 <Button
-                                  key={target}
                                   variant="ghost"
                                   size="sm"
-                                  className={cn(
-                                    "text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 px-1.5 gap-0.5",
-                                    activeApp === target &&
-                                      "text-foreground bg-black/5 dark:bg-white/5",
-                                  )}
-                                  title={t(titleKey)}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                  title={t("settings.editorRestart.current")}
                                   onClick={() => {
                                     void (async () => {
+                                      const titleKey =
+                                        activeApp === "claude-desktop"
+                                          ? "settings.editorRestart.claudeDesktop"
+                                          : activeApp === "codex"
+                                            ? "settings.editorRestart.codex"
+                                            : "settings.editorRestart.claudeCode";
                                       try {
                                         const msg =
                                           await settingsApi.restartEditorApp(
-                                            target,
+                                            activeApp,
                                           );
                                         toast.success(
-                                          t("editorRestart.success", {
+                                          t("settings.editorRestart.success", {
                                             app: t(titleKey),
                                             detail: msg,
                                           }),
                                         );
                                       } catch (error) {
                                         toast.error(
-                                          t("editorRestart.failed", {
+                                          t("settings.editorRestart.failed", {
                                             app: t(titleKey),
                                             error:
                                               error instanceof Error
@@ -1673,12 +1666,9 @@ function App() {
                                     })();
                                   }}
                                 >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  <span className="text-[10px] font-semibold leading-none">
-                                    {short}
-                                  </span>
+                                  <RotateCcw className="w-4 h-4" />
                                 </Button>
-                              ))}
+                              )}
                             </>
                           )}
                         </motion.div>

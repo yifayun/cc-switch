@@ -740,6 +740,7 @@
       "claudeCode": "Restart Claude Code editor (Cursor/VS Code)",
       "claudeDesktop": "Restart Claude Desktop",
       "codex": "Restart Codex editor (Cursor/VS Code)",
+      "current": "Restart the editor for the current app",
       "success": "{{app}}: {{detail}}",
       "failed": "Failed to restart {{app}}: {{error}}"
     },

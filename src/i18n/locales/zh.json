@@ -740,6 +740,7 @@
       "claudeCode": "重启 Claude Code 编辑器 (Cursor/VS Code)",
       "claudeDesktop": "重启 Claude Desktop",
       "codex": "重启 Codex 编辑器 (Cursor/VS Code)",
+      "current": "重启当前应用对应的编辑器",
       "success": "{{app}}：{{detail}}",
       "failed": "{{app}} 重启失败：{{error}}"
     },

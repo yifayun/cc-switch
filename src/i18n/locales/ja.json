@@ -740,6 +740,7 @@
       "claudeCode": "Claude Code エディタを再起動 (Cursor/VS Code)",
       "claudeDesktop": "Claude Desktop を再起動",
       "codex": "Codex エディタを再起動 (Cursor/VS Code)",
+      "current": "現在のアプリに対応するエディタを再起動",
       "success": "{{app}}：{{detail}}",
       "failed": "{{app}} の再起動に失敗：{{error}}"
     },
