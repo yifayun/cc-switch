@@ -15,9 +15,7 @@ pub enum EditorAppTarget {
 fn map_target(raw: &str) -> Result<EditorAppTarget, String> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "claude" | "claude-code" | "claudecode" => Ok(EditorAppTarget::ClaudeCode),
-        "claude-desktop" | "claudedesktop" | "claude_desktop" => {
-            Ok(EditorAppTarget::ClaudeDesktop)
-        }
+        "claude-desktop" | "claudedesktop" | "claude_desktop" => Ok(EditorAppTarget::ClaudeDesktop),
         "codex" => Ok(EditorAppTarget::Codex),
         other => Err(format!("Unsupported editor target: {other}")),
     }
@@ -72,10 +70,7 @@ fn restart_windows(target: EditorAppTarget) -> Result<String, String> {
                 format!(r"{local}\Programs\Microsoft VS Code\Code.exe"),
                 r"C:\Program Files\Microsoft VS Code\Code.exe".to_string(),
             ];
-            (
-                &["Cursor.exe", "Code.exe", "code.exe"],
-                candidates,
-            )
+            (&["Cursor.exe", "Code.exe", "code.exe"], candidates)
         }
     };
 
@@ -116,7 +111,9 @@ fn restart_windows(target: EditorAppTarget) -> Result<String, String> {
 fn restart_macos(target: EditorAppTarget) -> Result<String, String> {
     let apps: &[&str] = match target {
         EditorAppTarget::ClaudeDesktop => &["Claude"],
-        EditorAppTarget::ClaudeCode | EditorAppTarget::Codex => &["Cursor", "Code", "Visual Studio Code"],
+        EditorAppTarget::ClaudeCode | EditorAppTarget::Codex => {
+            &["Cursor", "Code", "Visual Studio Code"]
+        }
     };
     for app in apps {
         let _ = Command::new("osascript")
@@ -136,14 +133,12 @@ fn restart_macos(target: EditorAppTarget) -> Result<String, String> {
 #[cfg(all(unix, not(target_os = "macos")))]
 fn restart_linux(target: EditorAppTarget) -> Result<String, String> {
     let (patterns, binaries): (&[&str], &[&str]) = match target {
-        EditorAppTarget::ClaudeDesktop => (
-            &["claude-desktop", "claude"],
-            &["claude-desktop", "claude"],
-        ),
-        EditorAppTarget::ClaudeCode | EditorAppTarget::Codex => (
-            &["cursor", "code"],
-            &["cursor", "code"],
-        ),
+        EditorAppTarget::ClaudeDesktop => {
+            (&["claude-desktop", "claude"], &["claude-desktop", "claude"])
+        }
+        EditorAppTarget::ClaudeCode | EditorAppTarget::Codex => {
+            (&["cursor", "code"], &["cursor", "code"])
+        }
     };
     for pat in patterns {
         let _ = Command::new("pkill").args(["-f", pat]).output();

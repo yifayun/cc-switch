@@ -95,14 +95,9 @@ export function CodexSshSyncSection({
     [enabled, hosts],
   );
 
-  const updateHost = useCallback(
-    (id: string, patch: Partial<CodexSshHost>) => {
-      setHosts((prev) =>
-        prev.map((h) => (h.id === id ? { ...h, ...patch } : h)),
-      );
-    },
-    [],
-  );
+  const updateHost = useCallback((id: string, patch: Partial<CodexSshHost>) => {
+    setHosts((prev) => prev.map((h) => (h.id === id ? { ...h, ...patch } : h)));
+  }, []);
 
   const toggleExpanded = (id: string) => {
     setExpandedIds((prev) => {
@@ -129,7 +124,9 @@ export function CodexSshSyncSection({
     try {
       const result = await settingsApi.codexSshSyncSaveSettings(draft);
       onSaved?.(result.settings);
-      const lastError = result.settings.hosts?.find((h) => h.lastError)?.lastError;
+      const lastError = result.settings.hosts?.find(
+        (h) => h.lastError,
+      )?.lastError;
       if (lastError) {
         toast.warning(
           t("settings.codexSshSync.saveOkSyncFailed", { error: lastError }),
@@ -226,17 +223,30 @@ export function CodexSshSyncSection({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={collapseAll}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={collapseAll}
+            >
               {t("settings.codexSshSync.collapseAll")}
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={expandAll}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={expandAll}
+            >
               {t("settings.codexSshSync.expandAll")}
             </Button>
           </div>
 
           {hosts.map((host) => {
             const expanded = expandedIds.has(host.id);
-            const title = host.name?.trim() || host.host || t("settings.codexSshSync.namePlaceholder");
+            const title =
+              host.name?.trim() ||
+              host.host ||
+              t("settings.codexSshSync.namePlaceholder");
             return (
               <div
                 key={host.id}
@@ -313,7 +323,9 @@ export function CodexSshSyncSection({
                           onChange={(e) =>
                             updateHost(host.id, { name: e.target.value })
                           }
-                          placeholder={t("settings.codexSshSync.namePlaceholder")}
+                          placeholder={t(
+                            "settings.codexSshSync.namePlaceholder",
+                          )}
                         />
                       </div>
                       <div className="space-y-1">

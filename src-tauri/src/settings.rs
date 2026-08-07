@@ -775,11 +775,7 @@ pub fn merge_codex_ssh_passwords(
         return;
     };
     for host in &mut incoming.hosts {
-        let incoming_empty = host
-            .password
-            .as_ref()
-            .map(|p| p.is_empty())
-            .unwrap_or(true);
+        let incoming_empty = host.password.as_ref().map(|p| p.is_empty()).unwrap_or(true);
         if !incoming_empty {
             continue;
         }

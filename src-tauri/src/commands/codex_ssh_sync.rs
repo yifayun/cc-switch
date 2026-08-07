@@ -24,14 +24,13 @@ pub async fn codex_ssh_sync_get_settings() -> Result<Option<CodexSshSyncSettings
 }
 
 #[tauri::command]
-pub async fn codex_ssh_sync_save_settings(
-    settings: CodexSshSyncSettings,
-) -> Result<Value, String> {
+pub async fn codex_ssh_sync_save_settings(settings: CodexSshSyncSettings) -> Result<Value, String> {
     // Save also performs an immediate SSH sync; keep it off the async runtime.
-    let saved = tokio::task::spawn_blocking(move || sync_service::save_settings_and_hooks(settings))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let saved =
+        tokio::task::spawn_blocking(move || sync_service::save_settings_and_hooks(settings))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
     let mut for_frontend = saved;
     settings::redact_codex_ssh_passwords(&mut for_frontend);
     Ok(json!({
@@ -57,11 +56,8 @@ pub async fn codex_ssh_sync_now(
     // Blocking SSH/SCP — run off the async runtime.
     let result = tokio::task::spawn_blocking(move || {
         if let Some(id) = hostId {
-            let hosts: Vec<CodexSshHost> = settings
-                .hosts
-                .into_iter()
-                .filter(|h| h.id == id)
-                .collect();
+            let hosts: Vec<CodexSshHost> =
+                settings.hosts.into_iter().filter(|h| h.id == id).collect();
             if hosts.is_empty() {
                 return Err(AppError::localized(
                     "codex_ssh_sync.no_hosts",
@@ -83,11 +79,7 @@ pub async fn codex_ssh_sync_now(
 #[tauri::command]
 pub async fn codex_ssh_sync_test_host(mut host: CodexSshHost) -> Result<Value, String> {
     // Frontend redacts passwords; restore saved password when the field is empty.
-    let incoming_empty = host
-        .password
-        .as_ref()
-        .map(|p| p.is_empty())
-        .unwrap_or(true);
+    let incoming_empty = host.password.as_ref().map(|p| p.is_empty()).unwrap_or(true);
     if incoming_empty {
         if let Some(saved) = settings::get_codex_ssh_sync_settings() {
             if let Some(old) = saved.hosts.iter().find(|h| h.id == host.id) {

@@ -18,9 +18,7 @@ use crate::codex_config::{
 };
 use crate::config::get_app_config_dir;
 use crate::error::AppError;
-use crate::settings::{
-    self, CodexSshHost, CodexSshSyncSettings, update_codex_ssh_host_status,
-};
+use crate::settings::{self, update_codex_ssh_host_status, CodexSshHost, CodexSshSyncSettings};
 
 const SSH_INCLUDE_FILENAME: &str = "cc-switch-codex-sync.conf";
 const DEFAULT_PROXY_PORT: u16 = 15721;
@@ -147,10 +145,7 @@ fn host_password(host: &CodexSshHost) -> Option<&str> {
     if host_identity(host).is_some() {
         return None;
     }
-    host.password
-        .as_ref()
-        .map(|s| s.as_str())
-        .filter(|s| !s.is_empty())
+    host.password.as_deref().filter(|s| !s.is_empty())
 }
 
 fn uses_password_auth(host: &CodexSshHost) -> bool {
@@ -170,7 +165,11 @@ impl Drop for AskPassGuard {
     }
 }
 
-fn write_askpass_files(password: &str, script_path: &Path, pass_path: &Path) -> Result<(), AppError> {
+fn write_askpass_files(
+    password: &str,
+    script_path: &Path,
+    pass_path: &Path,
+) -> Result<(), AppError> {
     if let Some(parent) = script_path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
@@ -195,7 +194,10 @@ fn write_askpass_files(password: &str, script_path: &Path, pass_path: &Path) -> 
     }
     #[cfg(not(windows))]
     {
-        let content = format!("#!/bin/sh\ncat {}\n", shell_quote(&pass_path.display().to_string()));
+        let content = format!(
+            "#!/bin/sh\ncat {}\n",
+            shell_quote(&pass_path.display().to_string())
+        );
         fs::write(script_path, content).map_err(|e| AppError::io(script_path, e))?;
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(script_path)
@@ -657,15 +659,9 @@ pub fn pull_remote_sessions_for_usage() -> usize {
         match pull_remote_sessions(host) {
             Ok(n) => {
                 total += n;
-                log::info!(
-                    "Pulled {n} remote Codex session files from {}",
-                    host.host
-                );
+                log::info!("Pulled {n} remote Codex session files from {}", host.host);
             }
-            Err(e) => log::warn!(
-                "Pull remote Codex sessions from {} failed: {e}",
-                host.host
-            ),
+            Err(e) => log::warn!("Pull remote Codex sessions from {} failed: {e}", host.host),
         }
     }
     total
@@ -793,11 +789,7 @@ pub fn sync_enabled_hosts() -> Result<CodexSshSyncResult, AppError> {
             "Codex SSH sync is disabled.",
         ));
     }
-    let hosts: Vec<_> = settings
-        .hosts
-        .into_iter()
-        .filter(|h| h.enabled)
-        .collect();
+    let hosts: Vec<_> = settings.hosts.into_iter().filter(|h| h.enabled).collect();
     if hosts.is_empty() {
         return Err(AppError::localized(
             "codex_ssh_sync.no_hosts",
@@ -1075,7 +1067,8 @@ fn ensure_ssh_config_include(ssh_dir: &Path) -> Result<(), AppError> {
     let config_path = ssh_dir.join("config");
     let include_line = format!("Include {SSH_INCLUDE_FILENAME}");
     if config_path.is_file() {
-        let existing = fs::read_to_string(&config_path).map_err(|e| AppError::io(&config_path, e))?;
+        let existing =
+            fs::read_to_string(&config_path).map_err(|e| AppError::io(&config_path, e))?;
         if existing.lines().any(|l| {
             let t = l.trim();
             t == include_line || t == format!("Include ~/.ssh/{SSH_INCLUDE_FILENAME}")
@@ -1092,7 +1085,8 @@ fn ensure_ssh_config_include(ssh_dir: &Path) -> Result<(), AppError> {
         fs::write(&config_path, next).map_err(|e| AppError::io(&config_path, e))?;
     } else {
         fs::create_dir_all(ssh_dir).map_err(|e| AppError::io(ssh_dir, e))?;
-        fs::write(&config_path, format!("{include_line}\n")).map_err(|e| AppError::io(&config_path, e))?;
+        fs::write(&config_path, format!("{include_line}\n"))
+            .map_err(|e| AppError::io(&config_path, e))?;
     }
     #[cfg(unix)]
     {
